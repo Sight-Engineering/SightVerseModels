@@ -22,7 +22,7 @@ export function createUI(h) {
     panel: $('#panel'), panelScroll: $('#panel-scroll'), panelFoot: $('#panel-foot'),
     help: $('#help'), toast: $('#toast'), fade: $('#fade'), joystick: $('#joystick'),
     btnOrbit: $('#btn-orbit'), btnWalk: $('#btn-walk'), btnMood: $('#btn-mood'), debug: $('#debug'),
-    canvas: $('#scene'),
+    canvas: $('#scene'), btnAR: $('#btn-ar'),
   };
   $('#loader-tag').textContent = COMPANY.tagline;
 
@@ -181,6 +181,10 @@ export function createUI(h) {
     fadeIn() { el.fade.classList.remove('on'); },
     setCursor(pointer) { el.canvas.classList.toggle('pointer', !!pointer); },
     setDebug(text) { el.debug.hidden = false; el.debug.textContent = text; },
+
+    // ------------------------------------------------------------ AR
+    setARAvailable(ok) { if (el.btnAR) el.btnAR.hidden = !ok; },
+    setARMode(active) { document.body.classList.toggle('ar-active', active); },
   };
 
   el.panelFoot.addEventListener('click', (e) => {
@@ -193,6 +197,7 @@ export function createUI(h) {
   el.btnOrbit.addEventListener('click', () => h.onMode('orbit'));
   el.btnWalk.addEventListener('click', () => h.onMode('walk'));
   el.btnMood.addEventListener('click', () => h.onMood());
+  el.btnAR?.addEventListener('click', () => h.onAR());
   $('#btn-fs').addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen?.();
     else document.documentElement.requestFullscreen?.().catch(() => {});

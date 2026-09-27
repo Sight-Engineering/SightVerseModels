@@ -7,6 +7,7 @@ import { createEnvironment } from './sky.js';
 import { loadBuildings } from './buildings.js';
 import { createVegetation, vegetationBytes } from './vegetation.js';
 import { createFountain } from './fountain.js';
+import { createAR, arSessionSupported } from './ar.js';
 import { CameraRig } from './camera.js';
 import { createPostFX } from './postfx.js';
 import { createUI } from './ui.js';
@@ -30,7 +31,7 @@ let tierName = params.get('quality') in TIERS ? params.get('quality') : (isTouch
 const canvas = document.getElementById('scene');
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance', stencil: false });
 } catch (e) {
   document.getElementById('loader-label').textContent = 'WebGL is not available';
   document.getElementById('loader-note').hidden = false;
@@ -42,6 +43,7 @@ renderer.toneMappingExposure = 1;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.info.autoReset = false;
+renderer.xr.enabled = true;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0xb7c9d6, 0.00024);
@@ -55,8 +57,8 @@ sun.shadow.camera.far = 1400;
 scene.add(sun, sun.target);
 
 // ---------------------------------------------------------------- UI
-const state = { selected: null, hover: null, mood: 'day', mode: 'orbit', entered: false };
-let buildings = null, rig = null, post = null, veg = null, terrain = null, water = null, fountain = null;
+const state = { selected: null, hover: null, mood: 'day', mode: 'orbit', entered: false, arMode: false };
+let buildings = null, rig = null, post = null, veg = null, terrain = null, water = null, fountain = null, islandRoot = null, ar = null;
 const hl = {};                       // per-building highlight amounts (smoothed)
 let viewShift = 0, viewShiftY = 0;
 
@@ -64,6 +66,7 @@ const HOME = {
   position: new THREE.Vector3(146, 159, 208),
   target: new THREE.Vector3(0, 6, 0),
 };
+const AR_TABLETOP_METRES = 1.3;   // real-world footprint of the whole island once placed in AR
 
 const ui = createUI({
   onSelect: (id) => select(id),
@@ -74,6 +77,7 @@ const ui = createUI({
   onPinHover: (id) => { state.hover = id; },
   onJoystick: (x, y) => rig?.setJoystick(x, y),
   onMinimap: (x, z) => travelTo(x, z),
+  onAR: () => ar?.enter(),
 });
 
 // ---------------------------------------------------------------- loading progress
@@ -101,13 +105,17 @@ async function boot() {
   terrain = t; buildings = b; veg = v;
   load.bytes += 3.3e6;
 
+  islandRoot = new THREE.Group();
+  islandRoot.name = 'IslandRoot';        // everything that AR shrinks onto a real surface - stays at identity on desktop/mobile web
+  scene.add(islandRoot);
+
   terrain.mesh.castShadow = true;
-  scene.add(terrain.mesh);
+  islandRoot.add(terrain.mesh);
   water = createWater({ renderer, heightTex: terrain.heightTex });
-  scene.add(water.mesh);
-  scene.add(buildings.group, ...buildings.proxies, veg.group);
+  islandRoot.add(water.mesh);
+  islandRoot.add(buildings.group, ...buildings.proxies, veg.group);
   fountain = createFountain({ yaw: Math.atan2(HOME.position.x, HOME.position.z) });   // groove faces the opening camera view
-  scene.add(fountain.group);
+  islandRoot.add(fountain.group);
   buildings.items.forEach((it) => { hl[it.id] = 0; });
 
   const colliders = buildings.items.map((it) => {
@@ -130,6 +138,18 @@ async function boot() {
   refreshProgress('Compiling shaders');
   try { await renderer.compileAsync(scene, camera); } catch { /* not fatal */ }
   fitSun(true);
+
+  ar = createAR({
+    renderer, scene, camera, islandRoot,
+    scale: AR_TABLETOP_METRES / SIZE,          // the whole island, edge to edge, fits on a table
+    pick,
+    onSelectBuilding: (id) => arSelect(id),
+    onEnter: () => { state.arMode = true; rig.controls.enabled = false; ui.setARMode(true); },
+    onExit: () => { state.arMode = false; rig.controls.enabled = true; ui.setARMode(false); ui.closePanel(); state.selected = null; },
+    toast: (m) => ui.toast(m),
+  });
+  arSessionSupported().then((ok) => ui.setARAvailable(ok));
+
   renderer.setAnimationLoop(frame);
   ui.setMode('orbit');
   ui.ready(enter);
@@ -222,6 +242,7 @@ async function select(id) {
   state.selected = id;
   ui.openPanel(id);
   ui.fadeHint();
+  if (state.arMode) return;                  // the camera is the phone in AR - nothing to fly
   if (state.mode === 'walk') {
     rig.faceToward(item.center.x, item.center.z);
   } else {
@@ -229,9 +250,13 @@ async function select(id) {
   }
 }
 
+/** Tapping a building's miniature while it's placed in AR - just show the panel, no camera moves. */
+function arSelect(id) { select(id); }
+
 function closeSelection(fly) {
   ui.closePanel();
   state.selected = null;
+  if (state.arMode) return;
   if (fly && state.mode === 'orbit') rig.flyTo(HOME, 2.2);
 }
 
@@ -337,8 +362,10 @@ addEventListener('pointerup', (e) => {
 });
 
 function pick(x, y) {
+  if (!buildings) return null;
   ndc.set((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1);
-  raycaster.setFromCamera(ndc, camera);
+  const cam = renderer.xr.isPresenting ? (renderer.xr.updateCamera(camera), renderer.xr.getCamera()) : camera;
+  raycaster.setFromCamera(ndc, cam);
   const hits = raycaster.intersectObjects(buildings.proxies, false);
   return hits.length ? hits[0].object.userData.buildingId : null;
 }
@@ -358,11 +385,22 @@ const v3 = new THREE.Vector3();
 let last = performance.now(), time = 0, frameCount = 0;
 let fpsAcc = 0, fpsFrames = 0, slowSeconds = 0, statTimer = 0, miniTimer = 0;
 
-function frame(now) {
+function frame(now, xrFrame) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   time += dt;
   frameCount++;
+
+  if (state.arMode) {
+    water.update(time);
+    veg.setTime(time);
+    veg.update(camera);
+    fountain.update(time, camera, renderer);
+    ar.update(xrFrame);
+    renderer.info.reset();
+    renderer.render(scene, camera);          // no post-processing / no OrbitControls while the phone is the camera
+    return;
+  }
 
   rig.update(dt);
   applyViewOffset(dt);
@@ -445,7 +483,8 @@ function updatePins() {
 // debugging / testing hooks
 window.__sv = {
   get scene() { return scene; }, get camera() { return camera; }, get rig() { return rig; }, get renderer() { return renderer; },
-  get buildings() { return buildings; }, get state() { return state; }, get veg() { return veg; }, get fountain() { return fountain; }, THREE,
+  get buildings() { return buildings; }, get state() { return state; }, get veg() { return veg; }, get fountain() { return fountain; },
+  get islandRoot() { return islandRoot; }, get ar() { return ar; }, THREE,
   select, setMode, applyTier, toggleMood, goHome, HOME, viewFor,
   frames: () => frameCount,
 };
