@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sight Verse - High Fidelity City</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;900&display=swap');
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+
+        /* Igloo-style Loader */
+        #loader-wrapper {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+        #loader-counter {
+            font-size: 15vw; font-weight: 900; color: #fff;
+            line-height: 0.8; margin-bottom: 20px; font-variant-numeric: tabular-nums;
+            letter-spacing: -1vw;
+        }
+        #loader-bar-container { width: 300px; height: 1px; background: rgba(255,255,255,0.1); position: relative; }
+        #loader-bar { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: #fff; }
+        #loader-text { color: #444; font-size: 9px; text-transform: uppercase; letter-spacing: 5px; margin-top: 20px; text-align: center; }
+
+        /* UI Overlay */
+        #tooltip {
+            position: absolute; pointer-events: none; background: #fff; color: #000;
+            padding: 5px 12px; font-size: 10px; font-weight: 900; text-transform: uppercase;
+            letter-spacing: 1px; display: none; z-index: 50; transform: translate(-50%, -100%);
+            margin-top: -15px; white-space: nowrap;
+        }
+
+        #info-window {
+            position: absolute; display: none; width: 260px;
+            background: rgba(10, 10, 10, 0.9); backdrop-filter: blur(30px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px;
+            padding: 25px; color: white; z-index: 60; pointer-events: auto;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+        }
+        #info-window h2 { margin: 0 0 10px 0; font-size: 24px; font-weight: 900; }
+        #info-window p { margin: 0 0 20px 0; font-size: 14px; color: rgba(255,255,255,0.5); line-height: 1.6; }
+        .actions { display: flex; gap: 10px; }
+        button { background: #fff; border: none; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 11px; font-weight: 900; text-transform: uppercase; flex: 2; transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1); }
+        button:hover { background: #ccc; transform: translateY(-2px); }
+        #back-btn-ui { background: rgba(255,255,255,0.1); color: #fff; flex: 1; border: 1px solid rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body>
+
+    <div id="loader-wrapper">
+        <div id="loader-counter">00</div>
+        <div id="loader-bar-container"><div id="loader-bar"></div></div>
+        <div id="loader-text">Compiling Sight Verse Models</div>
+    </div>
+
+    <div id="tooltip">Label</div>
+
+    <div id="info-window">
+        <h2 id="win-title">Building</h2>
+        <p id="win-desc">Description</p>
+        <div class="actions">
+            <button id="enter-btn">Initialize</button>
+            <button id="back-btn-ui">Back</button>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "gsap": "https://cdn.skypack.dev/gsap"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+        import { Sky } from 'three/addons/objects/Sky.js';
+        import gsap from 'gsap';
+
+        // 1. DATA (Raw GitHub Links + Cache Buster)
+        const cb = "?v=" + Date.now();
+        const buildingsData = [
+            { id: 1, name: "About Us", pos: [-45, 0, 15], desc: "Visionary engineering base.", url: 'https://raw.githubusercontent.com/Sight-Engineering/SightVerseModels/main/Assets/AboutUs.glb' + cb },
+            { id: 2, name: "Services", pos: [10, 0, -40], desc: "Digital workflow systems.", url: 'https://raw.githubusercontent.com/Sight-Engineering/SightVerseModels/main/Assets/Services.glb' + cb },
+            { id: 3, name: "Clients", pos: [35, 0, -25], desc: "Our collaborative partners.", url: 'https://raw.githubusercontent.com/Sight-Engineering/SightVerseModels/main/Assets/Clients.glb' + cb },
+            { id: 4, name: "Contact", pos: [20, 0, 50], desc: "Get in touch with the verse.", url: 'https://raw.githubusercontent.com/Sight-Engineering/SightVerseModels/main/Assets/Contact.glb' + cb },
+            { id: 5, name: "Sight Verse", pos: [45, 0, 15], desc: "The Central Hub Architecture." }, 
+            { id: 6, name: "Portal", pos: [-30, 0, 50], desc: "Verse Uplink Station." }
+        ];
+
+        // 2. SCENE SETUP
+        const manager = new THREE.LoadingManager();
+        const textureLoader = new THREE.TextureLoader(manager);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0; // Cinematic reveal start
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        
+        // --- STRICT TETHER CONSTRAINTS ---
+        controls.enablePan = true;
+        controls.screenSpacePanning = false; 
+        controls.minDistance = 45;
+        controls.maxDistance = 260;
+        controls.maxPolarAngle = Math.PI / 2.15;
+        controls.minPolarAngle = Math.PI / 6;
+
+        camera.position.set(220, 160, 260); 
+
+        // 3. REVEAL ANIMATION
+        let revealTriggered = false;
+        const startReveal = () => {
+            if (revealTriggered) return;
+            revealTriggered = true;
+            const tl = gsap.timeline();
+            tl.to('#loader-wrapper', { yPercent: -100, duration: 1.5, ease: "expo.inOut", delay: 0.5 });
+            tl.to(renderer, { toneMappingExposure: 1.3, duration: 2.5, ease: "power2.inOut" }, "-=1");
+            tl.to(camera.position, { x: 75, y: 55, z: 100, duration: 3.5, ease: "expo.out" }, "-=2.2");
+            tl.to(controls.target, { x: 0, y: 5, z: 0, duration: 3.5, ease: "expo.out" }, "-=3.5");
+
+            buildingGroups.forEach((group, index) => {
+                tl.fromTo(group.scale, { y: 0.001 }, { y: 1, duration: 2.5, ease: "elastic.out(1, 0.75)", delay: index * 0.1 }, "-=2.8");
+                group.traverse(c => { 
+                    if (c.isMesh && c.material) { 
+                        c.visible = true; 
+                        tl.fromTo(c.material, { opacity: 0, emissiveIntensity: 3 }, { opacity: 1, emissiveIntensity: 0, duration: 2 }, "-=2.2");
+                    }
+                });
+            });
+        };
+
+        manager.onProgress = (url, loaded, total) => {
+            const p = Math.floor((loaded / total) * 100);
+            if(!isNaN(p)) {
+                document.getElementById('loader-counter').innerText = p.toString().padStart(2, '0');
+                gsap.to('#loader-bar', { width: p + '%' });
+            }
+        };
+        manager.onLoad = startReveal;
+        manager.onError = (url) => { console.warn("Asset skipped:", url); startReveal(); };
+        setTimeout(startReveal, 10000); // Fail-safe
+
+        // 4. LIGHTING & ENVIRONMENT
+        scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        sunLight.position.set(100, 200, 100);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.set(2048, 2048);
+        scene.add(sunLight);
+
+        const sky = new Sky();
+        sky.scale.setScalar(450000);
+        scene.add(sky);
+        const sunPos = new THREE.Vector3();
+        sunPos.setFromSphericalCoords(1, THREE.MathUtils.degToRad(80), THREE.MathUtils.degToRad(145));
+        sky.material.uniforms['sunPosition'].value.copy(sunPos);
+
+        new RGBELoader(manager).load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/sky_cloudy_noon_1k.hdr', (t) => {
+            t.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = t;
+        });
+
+        // 5. LANDSCAPE (Proper Textured)
+        const groundTexture = textureLoader.load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
+        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(10, 10);
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(1500, 1500), 
+            new THREE.MeshStandardMaterial({ color: 0x444444, map: groundTexture, roughness: 0.8 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // 6. BUILDINGS LOADER
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+        const loader = new GLTFLoader(manager);
+        loader.setDRACOLoader(dracoLoader);
+
+        const buildingGroups = [];
+        const buildingMeshes = [];
+
+        buildingsData.forEach(data => {
+            const group = new THREE.Group();
+            group.position.set(data.pos[0], 0, data.pos[2]);
+            group.userData = data;
+            group.scale.y = 0.001; 
+            scene.add(group);
+            buildingGroups.push(group);
+
+            if (data.url) {
+                loader.load(data.url, (gltf) => {
+                    const model = gltf.scene;
+                    const box = new THREE.Box3().setFromObject(model);
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    const scale = (45 / Math.max(size.x, size.y, size.z)); // Normalized Scaling
+                    model.scale.setScalar(scale);
+
+                    const center = new THREE.Vector3();
+                    box.getCenter(center);
+                    model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+                    group.add(model);
+                    
+                    model.traverse(c => {
+                        if (c.isMesh) {
+                            c.material = c.material.clone();
+                            c.material.emissive = new THREE.Color(0x00ffff);
+                            c.material.emissiveIntensity = 0;
+                            c.material.transparent = true;
+                            c.castShadow = true;
+                            c.receiveShadow = true;
+                            buildingMeshes.push(c);
+                        }
+                    });
+                });
+            } else {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(12, 28, 12), new THREE.MeshStandardMaterial({ color: 0x222222, transparent: true, opacity: 0, emissive: 0x00ffff, emissiveIntensity: 0 }));
+                mesh.position.y = 14; mesh.castShadow = true; mesh.receiveShadow = true;
+                group.add(mesh); buildingMeshes.push(mesh);
+            }
+        });
+
+        // 7. INTERACTION
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const tooltip = document.getElementById('tooltip');
+        const infoWin = document.getElementById('info-window');
+        let selectedGroup = null;
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(buildingMeshes);
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while (obj.parent && !obj.userData.name) obj = obj.parent;
+                tooltip.style.display = 'block';
+                tooltip.style.left = e.clientX + 'px'; tooltip.style.top = e.clientY + 'px';
+                tooltip.innerText = obj.userData.name;
+                document.body.style.cursor = 'pointer';
+            } else {
+                tooltip.style.display = 'none'; document.body.style.cursor = 'default';
+            }
+        });
+
+        window.addEventListener('click', () => {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(buildingMeshes);
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while (obj.parent && !obj.userData.name) obj = obj.parent;
+                selectedGroup = obj;
+                const targetPos = new THREE.Vector3(selectedGroup.position.x, 8, selectedGroup.position.z);
+                
+                gsap.to(controls.target, { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: 1.5 });
+                gsap.to(camera.position, { x: targetPos.x, y: targetPos.y + 5, z: targetPos.z + 35, duration: 1.5 });
+                document.getElementById('win-title').innerText = selectedGroup.userData.name;
+                document.getElementById('win-desc').innerText = selectedGroup.userData.desc;
+                infoWin.style.display = 'block';
+            }
+        });
+
+        document.getElementById('back-btn-ui').onclick = (e) => {
+            e.stopPropagation();
+            infoWin.style.display = 'none'; selectedGroup = null;
+            gsap.to(camera.position, { x: 75, y: 55, z: 100, duration: 1.5 });
+            gsap.to(controls.target, { x: 0, y: 5, z: 0, duration: 1.5 });
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Restrict Pan Range
+            const panLimit = 40; 
+            controls.target.x = THREE.MathUtils.clamp(controls.target.x, -panLimit, panLimit);
+            controls.target.z = THREE.MathUtils.clamp(controls.target.z, -panLimit, panLimit);
+            controls.update();
+
+            if (selectedGroup && infoWin.style.display === 'block') {
+                const v = new THREE.Vector3(selectedGroup.position.x, 20, selectedGroup.position.z);
+                v.project(camera);
+                infoWin.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+                infoWin.style.top = `${(-(v.y) * 0.5 + 0.5) * window.innerHeight}px`;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
