@@ -67,6 +67,18 @@ const HOME = {
   target: new THREE.Vector3(0, 6, 0),
 };
 const AR_TABLETOP_METRES = 1.3;   // real-world footprint of the whole island once placed in AR
+const arSaved = { background: null, fog: null };   // sky + fog stashed while AR is running
+const AR_BUILDING_SCALE = 2;      // buildings are enlarged in AR so they read well on a table
+
+/** Scales every building about its own base (and its click hit-box with it). 1 = original size. */
+function setBuildingScale(s) {
+  for (const it of buildings.items) {
+    const base = it.holder.position;
+    it.holder.scale.setScalar(s);
+    it.proxy.scale.setScalar(s);
+    it.proxy.position.copy(it.center).sub(base).multiplyScalar(s).add(base);
+  }
+}
 
 const ui = createUI({
   onSelect: (id) => select(id),
@@ -144,8 +156,22 @@ async function boot() {
     scale: AR_TABLETOP_METRES / SIZE,          // the whole island, edge to edge, fits on a table
     pick,
     onSelectBuilding: (id) => arSelect(id),
-    onEnter: () => { state.arMode = true; rig.controls.enabled = false; ui.setARMode(true); },
-    onExit: () => { state.arMode = false; rig.controls.enabled = true; ui.setARMode(false); ui.closePanel(); state.selected = null; },
+    onEnter: () => {
+      state.arMode = true; rig.controls.enabled = false; ui.setARMode(true);
+      // the real world is the backdrop in AR: drop the sky dome + fog, keep the HDRI only as lighting
+      arSaved.background = scene.background; arSaved.fog = scene.fog;
+      scene.background = null; scene.fog = null;
+      water.mesh.visible = false;               // no sea in AR - just the island on your table
+      terrain.mesh.visible = false;             // ...and no ground: the buildings stand on your real surface
+      setBuildingScale(AR_BUILDING_SCALE);
+    },
+    onExit: () => {
+      state.arMode = false; rig.controls.enabled = true; ui.setARMode(false); ui.closePanel(); state.selected = null;
+      scene.background = arSaved.background; scene.fog = arSaved.fog;
+      water.mesh.visible = true;
+      terrain.mesh.visible = true;
+      setBuildingScale(1);
+    },
     toast: (m) => ui.toast(m),
   });
   arSessionSupported().then((ok) => ui.setARAvailable(ok));
@@ -488,3 +514,7 @@ window.__sv = {
   select, setMode, applyTier, toggleMood, goHome, HOME, viewFor,
   frames: () => frameCount,
 };
+// dev tool for the native AR app: http://localhost:5173/?exportar
+if (import.meta.env.DEV && params.has('exportar')) {
+  window.__exportAR = async (save) => (await import('./export-ar.js')).exportAR(window.__sv, save);
+}

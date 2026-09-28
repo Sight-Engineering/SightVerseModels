@@ -111,10 +111,15 @@ export function createAR({ renderer, scene, camera, islandRoot, scale, pick, onS
         domOverlay: { root: overlay },
       });
     } catch (err) {
-      toast?.('Could not start AR - ' + (err?.message || err));
+      console.error('[AR] requestSession failed:', err);
+      toast?.('Could not start AR - ' + (err?.name ? err.name + ': ' : '') + (err?.message || err));
       return;
     }
     session = s;
+
+    // tabletop placement wants a stable point near the device, not the runtime's own guess of the
+    // floor - 'local' is the widely-supported baseline; fall back gracefully if a browser rejects it.
+    try { renderer.xr.setReferenceSpaceType('local'); } catch (err) { console.warn('[AR] setReferenceSpaceType failed:', err); }
 
     islandRoot.visible = false;
     islandRoot.rotation.set(0, 0, 0);
@@ -139,7 +144,14 @@ export function createAR({ renderer, scene, camera, islandRoot, scale, pick, onS
     overlay.addEventListener('pointercancel', onPointerUp);
 
     session.addEventListener('end', onSessionEnd);
-    await renderer.xr.setSession(session);
+    try {
+      await renderer.xr.setSession(session);
+    } catch (err) {
+      console.error('[AR] renderer.xr.setSession failed:', err);
+      toast?.('Could not start AR - ' + (err?.name ? err.name + ': ' : '') + (err?.message || err));
+      await session.end().catch(() => {});
+      return;
+    }
     onEnter?.();
   }
 

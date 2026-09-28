@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "net.sightrealestate.verse",
+    "sha256_cert_fingerprints": ["C7:88:03:E3:1A:0D:1B:57:88:62:32:62:1B:02:3D:E7:2C:2B:2C:B8:47:1E:E0:D4:E0:51:F9:B3:42:EC:92:DC"]
+  }
+}]

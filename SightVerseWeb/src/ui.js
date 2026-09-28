@@ -49,7 +49,6 @@ export function createUI(h) {
   });
   const pinEls = Object.fromEntries([...el.pins.children].map((p) => [p.dataset.id, p]));
   const navEls = Object.fromEntries([...el.nav.children].map((n) => [n.dataset.id, n]));
-  $('#brand').addEventListener('click', (e) => { e.preventDefault(); h.onHome(); });
 
   // ------------------------------------------------------------ loader
   let shownPct = 0;

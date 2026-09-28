@@ -3,3 +3,7 @@ _raw/
 .vite/
 *.log
 _shots/
+
+android/*.keystore
+android/KEYSTORE-PASSWORD.txt
+android/build.log

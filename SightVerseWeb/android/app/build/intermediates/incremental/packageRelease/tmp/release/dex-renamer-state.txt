@@ -1,0 +1,4 @@
+#Sun Sep 27 16:38:55 AST 2026
+base.0=D\:\\Githup\\Unreal_Projects\\SightVerseModels\\SightVerseWeb\\android\\app\\build\\intermediates\\dex\\release\\minifyReleaseWithR8\\classes.dex
+renamed.0=classes.dex
+path.0=classes.dex
